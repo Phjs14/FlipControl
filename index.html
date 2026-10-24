@@ -27,6 +27,15 @@ body{background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-s
 .nav a.on,.nav a:hover{background:#1e293b;color:#10b981}
 th{text-align:left;color:#94a3b8;font-weight:500;padding:.5rem}td{padding:.5rem;border-top:1px solid #334155}
 :focus-visible{outline:2px solid #10b981;outline-offset:2px}
+@media(max-width:640px){
+table,tbody{display:block}
+tr:first-child{display:none}
+tr{display:block;border:1px solid #334155;border-radius:12px;margin-bottom:.6rem;padding:.35rem}
+td{display:flex;justify-content:space-between;gap:.75rem;border:0;padding:.25rem .4rem;text-align:right}
+td[data-l]::before{content:attr(data-l);color:#94a3b8;text-align:left}
+td:last-child:not([data-l]){justify-content:flex-end}
+}
+.chart{position:relative;height:16rem}@media(min-width:768px){.chart{height:20rem}}
 #bnav{padding-bottom:calc(.25rem + env(safe-area-inset-bottom))}
 </style>
 </head>
@@ -121,15 +130,15 @@ const closeM=()=>{$('#modal').classList.add('hidden');$('#modal').classList.remo
 const fld=(l,n,v='',t='text',x='')=>`<label class="block text-sm text-slate-400">${l}<input class="inp mt-1" name="${n}" type="${t}" value="${v??''}" ${x}></label>`;
 function modal(t,body,fn){
   const m=$('#modal');
-  m.innerHTML=`<div class="card w-full max-w-md"><h3 class="font-semibold mb-3">${t}</h3><form id="mf" class="space-y-3">${body}<div class="flex gap-2 justify-end pt-2"><button type="button" class="btn2" onclick="closeM()">Cancelar</button><button class="btn">Salvar</button></div></form></div>`;
+  m.innerHTML=`<div class="card w-full max-w-md max-h-[90vh] overflow-y-auto"><h3 class="font-semibold mb-3">${t}</h3><form id="mf" class="space-y-3">${body}<div class="flex gap-2 justify-end pt-2"><button type="button" class="btn2" onclick="closeM()">Cancelar</button><button class="btn">Salvar</button></div></form></div>`;
   m.classList.remove('hidden');m.classList.add('flex');
   $('#mf').onsubmit=async e=>{e.preventDefault();try{await fn(Object.fromEntries(new FormData(e.target)));closeM();await load()}catch(x){toast(x.message)}}
 }
 function mk(id,type,labels,datasets,plugins=[]){
   charts[id]?.destroy();
-  charts[id]=new Chart($('#'+id),{type,plugins,data:{labels,datasets},options:{plugins:{legend:{display:datasets.length>1}},scales:{y:{ticks:{callback:v=>'R$ '+v},grid:{color:'#334155'}},x:{grid:{display:false}}}}})
+  charts[id]=new Chart($('#'+id),{type,plugins,data:{labels,datasets},options:{maintainAspectRatio:false,plugins:{legend:{display:datasets.length>1,position:'bottom',labels:{boxWidth:14,font:{size:11}}}},scales:{y:{ticks:{callback:v=>'R$ '+(v>=1000?v/1000+'k':v),font:{size:11}},grid:{color:'#334155'}},x:{ticks:{maxTicksLimit:6,maxRotation:0,font:{size:11}},grid:{display:false}}}}})
 }
-const kpi=(l,v,c='')=>`<div class="card"><p class="text-xs text-slate-400">${l}</p><p class="text-xl font-bold mt-1 ${c}">${v}</p></div>`;
+const kpi=(l,v,c='')=>`<div class="card"><p class="text-xs text-slate-400">${l}</p><p class="text-base sm:text-xl font-bold mt-1 break-words ${c}">${v}</p></div>`;
 
 /* ====== AÇÕES ====== */
 function flipForm(id){
@@ -178,11 +187,11 @@ function vDash(){
   <div class="card mt-3"><div class="flex justify-between text-sm mb-2"><span>${esc(S.cfg.goal_name)}: <b class="text-emerald-400">${R(m.saved)}</b> de ${R(S.cfg.goal)}</span><b>${m.pct.toFixed(1)}%</b></div>
   <div class="h-3 bg-slate-900 rounded-full overflow-hidden"><div class="h-full bg-gradient-to-r from-violet-500 to-emerald-400" style="width:${m.pct}%"></div></div>
   <p class="text-xs text-slate-400 mt-2">${!p.rem?'Meta atingida!':p.mo==null?'Registre vendas para ver a previsão.':`No ritmo atual (${R(p.base)}/mês), a meta fica pronta em ${fdate(p.mo)}.`}${stale?` <span class="text-amber-400">${stale} conta(s) paradas há mais de 30 dias.</span>`:''}</p></div>
-  <div class="grid lg:grid-cols-2 gap-3 mt-3"><div class="card"><h3 class="font-semibold mb-2">Lucro por mês</h3><canvas id="c1"></canvas></div><div class="card"><h3 class="font-semibold mb-2">Reserva acumulada</h3><canvas id="c2"></canvas></div></div>
-  <div class="card mt-3"><h3 class="font-semibold mb-2">Guardado por mês × necessário</h3><canvas id="c4"></canvas></div>`
+  <div class="grid lg:grid-cols-2 gap-3 mt-3"><div class="card"><h3 class="font-semibold mb-2">Lucro por mês</h3><div class="chart"><canvas id="c1"></canvas></div></div><div class="card"><h3 class="font-semibold mb-2">Reserva acumulada</h3><div class="chart"><canvas id="c2"></canvas></div></div></div>
+  <div class="card mt-3"><h3 class="font-semibold mb-2">Guardado por mês × necessário</h3><div class="chart"><canvas id="c4"></canvas></div></div>`
 }
 function vEst(){
-  return`<div class="flex flex-wrap gap-2 items-center justify-between mb-4"><h1 class="text-2xl font-bold">Estoque</h1><div class="flex gap-2"><input class="inp" placeholder="Buscar conta" oninput="S.q=this.value;$('#tb').innerHTML=rows('estoque')" value="${S.q}"><button class="btn whitespace-nowrap" onclick="flipForm()"><i class="icon-plus"></i> Nova conta</button></div></div>
+  return`<div class="flex flex-wrap gap-2 items-center justify-between mb-4"><h1 class="text-2xl font-bold">Estoque</h1><div class="flex gap-2 w-full sm:w-auto"><input class="inp min-w-0 flex-1" placeholder="Buscar conta" oninput="S.q=this.value;$('#tb').innerHTML=rows('estoque');lbl()" value="${S.q}"><button class="btn whitespace-nowrap" onclick="flipForm()"><i class="icon-plus"></i> Nova conta</button></div></div>
   <div class="card mb-4"><h3 class="font-semibold mb-2">Calculadora de preço de venda</h3><div class="grid grid-cols-3 gap-2">
   <input id="k1" class="inp" type="number" placeholder="Custo R$" oninput="calc()"><input id="k2" class="inp" type="number" value="${S.cfg.margin}" oninput="calc()" aria-label="Margem %"><input id="k3" class="inp" type="number" value="${S.cfg.fee}" oninput="calc()" aria-label="Taxa %"></div>
   <p class="text-xs text-slate-500 mt-1">Custo, margem desejada (%) e taxa da plataforma (%).</p><p id="kr" class="mt-2 text-sm"></p></div>
@@ -206,7 +215,7 @@ function vProj(){
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpi('Meta',R(S.cfg.goal))}${kpi('Falta',R(p.rem))}${kpi('Ritmo mensal',R(p.base),'text-emerald-400')}${kpi('Previsão',p.rem?(p.mo==null?'sem dados':fdate(p.mo)):'Atingida','text-violet-400')}</div>
   ${p.need!=null&&p.rem?`<div class="card mt-3 text-sm">Para chegar em ${D(S.cfg.deadline)} você precisa guardar <b class="text-emerald-400">${R(p.need)}/mês</b>. ${p.base>=p.need?'Você está no ritmo.':`Faltam ${R(p.need-p.base)}/mês para esse ritmo.`}</div>`:''}
   <p class="text-xs text-slate-400 mt-2">Ritmo mensal: ${p.planned?'aporte planejado nos Ajustes':`média do lucro dos últimos ${p.n} mês(es) × ${p.pct}% enviado à reserva`}.</p>
-  <div class="card mt-3"><h3 class="font-semibold mb-2">Real (sólido) e projeção (tracejado): pessimista 70%, base e otimista 130%</h3><canvas id="c3"></canvas></div>`
+  <div class="card mt-3"><h3 class="font-semibold mb-2">Real (sólido) e projeção (tracejado): pessimista 70%, base e otimista 130%</h3><div class="chart"><canvas id="c3"></canvas></div></div>`
 }
 function vCfg(){
   const c=S.cfg;
@@ -247,8 +256,9 @@ function projChart(){
   const dl=p.nd!=null&&c+p.nd<N?c+p.nd:-1;
   mk('c3','line',L,ds,[{id:'dl',afterDraw(ch){if(dl<0)return;const x=ch.scales.x.getPixelForValue(dl),{top,bottom}=ch.chartArea,g=ch.ctx;g.save();g.strokeStyle=g.fillStyle='#38bdf8';g.setLineDash([4,4]);g.beginPath();g.moveTo(x,top);g.lineTo(x,bottom);g.stroke();g.fillText('Prazo',x+4,top+12);g.restore()}}])
 }
+const lbl=()=>document.querySelectorAll('table').forEach(t=>{const h=[...t.querySelectorAll('th')].map(x=>x.textContent);t.querySelectorAll('tr').forEach(r=>[...r.children].forEach((c,i)=>{if(c.tagName=='TD'&&h[i])c.dataset.l=h[i]}))});
 function render(){
-  $('#nav').innerHTML=navH('');$('#bnav').innerHTML=navH('flex-col !gap-0 text-xs !p-2');
+  $('#nav').innerHTML=navH('');$('#bnav').innerHTML=navH('flex-col !gap-0 text-[10px] !p-2');
   $('#main').innerHTML={dash:vDash,estoque:vEst,vendas:vVen,reserva:vRes,proj:vProj,cfg:vCfg}[S.view]();
   if(S.view=='dash'){
     const ks=months(6),pm=ks.map(k=>S.flips.filter(f=>f.status=='vendido'&&f.sold_at&&f.sold_at.slice(0,7)==k).reduce((a,f)=>a+profit(f),0));
@@ -258,6 +268,7 @@ function render(){
   if(S.view=='dash')dash2();
   if(S.view=='proj')projChart();
   if(S.view=='estoque')calc();
+  lbl();
 }
 async function load(){
   try{
