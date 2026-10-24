@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>FlipControl - Gestão de Ativos & Projeção Financeira</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FlipControl">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://unpkg.com/lucide-static@latest/font/lucide.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+body{background:#0f172a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif}
+.card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:1.1rem}
+.inp{width:100%;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:.55rem .75rem;outline:none;color:#e2e8f0}
+.inp:focus{border-color:#10b981}
+.btn{background:#10b981;color:#052e22;font-weight:600;border-radius:10px;padding:.5rem .9rem}
+.btn2{background:#334155;border-radius:10px;padding:.5rem .9rem}
+.lnk{color:#94a3b8;margin-left:.6rem}.lnk:hover{color:#10b981}
+.nav a{display:flex;gap:.6rem;align-items:center;padding:.6rem .8rem;border-radius:10px;color:#94a3b8;cursor:pointer}
+.nav a.on,.nav a:hover{background:#1e293b;color:#10b981}
+th{text-align:left;color:#94a3b8;font-weight:500;padding:.5rem}td{padding:.5rem;border-top:1px solid #334155}
+:focus-visible{outline:2px solid #10b981;outline-offset:2px}
+#bnav{padding-bottom:calc(.25rem + env(safe-area-inset-bottom))}
+</style>
+</head>
+<body>
+
+<div id="auth" class="hidden min-h-screen flex items-center justify-center p-4">
+  <div class="card w-full max-w-sm space-y-3">
+    <div class="text-2xl font-bold text-center"><span class="text-emerald-400">Flip</span>Control</div>
+    <p class="text-sm text-slate-400 text-center">Controle seus flips e acompanhe sua meta.</p>
+    <input id="em" type="text" placeholder="Usuário" autocomplete="username" autocapitalize="none" class="inp">
+    <input id="pw" type="password" placeholder="Senha (mín. 6 caracteres)" autocomplete="current-password" class="inp" onkeydown="if(event.key=='Enter')auth('in')">
+    <div class="flex gap-2"><button class="btn flex-1" onclick="auth('in')">Entrar</button><button class="btn2 flex-1" onclick="auth('up')">Criar conta</button></div>
+    <button class="w-full text-sm text-slate-400 underline pt-1" onclick="guest()">Experimentar sem cadastro</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div class="md:flex min-h-screen">
+    <aside class="hidden md:flex flex-col w-60 p-4 border-r border-slate-800 sticky top-0 h-screen">
+      <div class="text-xl font-bold mb-6"><span class="text-emerald-400">Flip</span>Control</div>
+      <nav class="nav space-y-1" id="nav"></nav>
+      <p id="demoTag" class="hidden mt-auto text-xs text-amber-400">Modo teste: dados só neste navegador.</p>
+    </aside>
+    <main id="main" class="flex-1 p-4 md:p-8 pb-24 md:pb-8 max-w-6xl w-full mx-auto"></main>
+  </div>
+  <nav id="bnav" class="nav md:hidden fixed bottom-0 inset-x-0 bg-slate-900 border-t border-slate-800 flex justify-around p-1 z-20"></nav>
+</div>
+
+<div id="modal" class="hidden fixed inset-0 bg-black/70 items-center justify-center p-4 z-30"></div>
+<div id="toast" class="hidden fixed top-4 right-4 bg-rose-600 text-white px-4 py-2 rounded-lg z-40 text-sm"></div>
+
+<script src="config.js"></script>
+<script>
+/* ====== CONFIGURAÇÃO: as chaves ficam no arquivo config.js ====== */
+const CFG=window.FC_CONFIG||{url:'COLE_SUA_SUPABASE_URL',key:''};
+const DEMO=CFG.url.startsWith('COLE');let LOCAL=DEMO;   // sem chaves = modo demo (localStorage)
+const sb=DEMO?null:supabase.createClient(CFG.url,CFG.key);
+
+const $=s=>document.querySelector(s);
+const R=v=>(+v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const D=d=>d?new Date(d).toLocaleDateString('pt-BR'):'-';
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const days=d=>Math.floor((Date.now()-new Date(d))/864e5);
+const fdate=n=>{const t=new Date();return new Date(t.getFullYear(),t.getMonth()+n,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'})};
+const months=n=>{const t=new Date();return[...Array(n)].map((_,i)=>{const d=new Date(t.getFullYear(),t.getMonth()-(n-1-i),1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')})};
+const mkey=o=>{const t=new Date(),d=new Date(t.getFullYear(),t.getMonth()+o,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
+const ml=k=>k.slice(5)+'/'+k.slice(2,4);
+let S={flips:[],savings:[],cfg:{savings_pct:100,goal_name:'Minha reserva',goal:30000,deadline:'',monthly:0,fee:10,margin:30},view:'dash',q:'',uid:null},charts={};
+Chart.defaults.color='#94a3b8';
+
+/* ====== CAMADA DE DADOS (Supabase ou localStorage) ====== */
+const LS=k=>JSON.parse(localStorage.getItem('fc_'+k)||'null');
+const SV=(k,v)=>localStorage.setItem('fc_'+k,JSON.stringify(v));
+const db={
+  async list(t){if(LOCAL)return LS(t)||[];const{data,error}=await sb.from(t).select('*').order('created_at',{ascending:false});if(error)throw error;return data},
+  async add(t,o){if(LOCAL){const a=LS(t)||[];a.unshift({...o,id:crypto.randomUUID(),created_at:new Date().toISOString()});SV(t,a);return}const{error}=await sb.from(t).insert(o);if(error)throw error},
+  async upd(t,id,o){if(LOCAL){SV(t,(LS(t)||[]).map(r=>r.id==id?{...r,...o}:r));return}const{error}=await sb.from(t).update(o).eq('id',id);if(error)throw error},
+  async del(t,id){if(LOCAL){SV(t,(LS(t)||[]).filter(r=>r.id!=id));return}const{error}=await sb.from(t).delete().eq('id',id);if(error)throw error},
+  async cfgLoad(){if(LOCAL)return LS('cfg');const{data}=await sb.from('settings').select('*').maybeSingle();return data},
+  async cfgSave(o){if(LOCAL){SV('cfg',o);return}const{data:{user}}=await sb.auth.getUser();const{error}=await sb.from('settings').upsert({user_id:user.id,...o});if(error)throw error}
+};
+
+/* ====== CÁLCULOS ====== */
+const cost=f=>(+f.purchase_price||0)+(+f.extra_costs||0);
+const profit=f=>(+f.sale_price||0)-(+f.platform_fee||0)-cost(f);
+function M(){
+  const st=S.flips.filter(f=>f.status=='estoque'),sd=S.flips.filter(f=>f.status=='vendido');
+  const lucro=sd.reduce((a,f)=>a+profit(f),0),spent=sd.reduce((a,f)=>a+cost(f),0);
+  const saved=S.savings.reduce((a,s)=>a+(+s.amount),0);
+  const g=sd.filter(f=>f.sold_at).map(f=>(new Date(f.sold_at)-new Date(f.created_at))/864e5);
+  return{st,sd,lucro,saved,inv:st.reduce((a,f)=>a+cost(f),0),rev:sd.reduce((a,f)=>a+(+f.sale_price||0),0),
+    roi:spent?lucro/spent*100:0,giro:g.length?g.reduce((a,b)=>a+b)/g.length:0,pct:Math.min(100,saved/(+S.cfg.goal||1)*100)}
+}
+function winMonths(){
+  const a=S.savings.map(s=>s.created_at).sort()[0]||S.flips.map(f=>f.sold_at).filter(Boolean).sort()[0];
+  if(!a)return 1;
+  const t=new Date(),d=new Date(a);
+  return Math.min(3,Math.max(1,(t.getFullYear()-d.getFullYear())*12+t.getMonth()-d.getMonth()+1))
+}
+function avgProfit(){const n=winMonths(),ks=months(n);return S.flips.filter(f=>f.status=='vendido'&&f.sold_at&&ks.includes(f.sold_at.slice(0,7))).reduce((a,f)=>a+profit(f),0)/n}
+function proj(){
+  const m=M(),n=winMonths(),pct=isNaN(+S.cfg.savings_pct)?100:+S.cfg.savings_pct,planned=+S.cfg.monthly>0;
+  const base=planned?+S.cfg.monthly:avgProfit()*pct/100,rem=Math.max(0,S.cfg.goal-m.saved);
+  let need=null,nd=null;
+  if(S.cfg.deadline){const d=new Date(S.cfg.deadline),t=new Date();nd=Math.max(1,(d.getFullYear()-t.getFullYear())*12+d.getMonth()-t.getMonth());need=rem/nd}
+  return{m,base,rem,mo:base>0?Math.ceil(rem/base):null,need,nd,planned,n,pct}
+}
+
+/* ====== UI HELPERS ====== */
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.remove('hidden');setTimeout(()=>e.classList.add('hidden'),4000)}
+const closeM=()=>{$('#modal').classList.add('hidden');$('#modal').classList.remove('flex')};
+const fld=(l,n,v='',t='text',x='')=>`<label class="block text-sm text-slate-400">${l}<input class="inp mt-1" name="${n}" type="${t}" value="${v??''}" ${x}></label>`;
+function modal(t,body,fn){
+  const m=$('#modal');
+  m.innerHTML=`<div class="card w-full max-w-md"><h3 class="font-semibold mb-3">${t}</h3><form id="mf" class="space-y-3">${body}<div class="flex gap-2 justify-end pt-2"><button type="button" class="btn2" onclick="closeM()">Cancelar</button><button class="btn">Salvar</button></div></form></div>`;
+  m.classList.remove('hidden');m.classList.add('flex');
+  $('#mf').onsubmit=async e=>{e.preventDefault();try{await fn(Object.fromEntries(new FormData(e.target)));closeM();await load()}catch(x){toast(x.message)}}
+}
+function mk(id,type,labels,datasets,plugins=[]){
+  charts[id]?.destroy();
+  charts[id]=new Chart($('#'+id),{type,plugins,data:{labels,datasets},options:{plugins:{legend:{display:datasets.length>1}},scales:{y:{ticks:{callback:v=>'R$ '+v},grid:{color:'#334155'}},x:{grid:{display:false}}}}})
+}
+const kpi=(l,v,c='')=>`<div class="card"><p class="text-xs text-slate-400">${l}</p><p class="text-xl font-bold mt-1 ${c}">${v}</p></div>`;
+
+/* ====== AÇÕES ====== */
+function flipForm(id){
+  const f=S.flips.find(x=>x.id==id)||{};
+  modal(id?'Editar conta':'Nova conta',
+    fld('Título da conta','title',f.title,'text','required placeholder="Ex: Conta Free Fire Lvl 70"')+fld('Jogo','game',f.game||'Free Fire')+
+    fld('Preço de compra (R$)','purchase_price',f.purchase_price,'number','step="0.01" required')+fld('Custos extras (R$)','extra_costs',f.extra_costs||0,'number','step="0.01"')+fld('Observações','notes',f.notes),
+    d=>{const o={title:d.title,game:d.game,purchase_price:+d.purchase_price,extra_costs:+d.extra_costs||0,notes:d.notes};return id?db.upd('flips',id,o):db.add('flips',o)})
+}
+function sell(id){
+  const f=S.flips.find(x=>x.id==id),sug=cost(f)/(1-S.cfg.margin/100-S.cfg.fee/100);
+  modal('Registrar venda',
+    `<p class="text-sm text-slate-400">Custo: ${R(cost(f))}. Preço sugerido (margem ${S.cfg.margin}%, taxa ${S.cfg.fee}%): <b class="text-emerald-400">${R(sug)}</b></p>`+
+    fld('Preço de venda (R$)','sale_price',sug>0&&isFinite(sug)?sug.toFixed(2):'','number','step="0.01" required')+fld('Taxa da plataforma (R$)','platform_fee',0,'number','step="0.01"')+fld('Canal de venda','channel','','text','placeholder="Ex: Mercado Livre, Discord"'),
+    d=>db.upd('flips',id,{status:'vendido',sale_price:+d.sale_price,platform_fee:+d.platform_fee||0,channel:d.channel,sold_at:new Date().toISOString()}))
+}
+const undo=async id=>{if(confirm('Voltar esta conta para o estoque?')){await db.upd('flips',id,{status:'estoque',sale_price:null,platform_fee:0,sold_at:null});load()}};
+const rm=async(t,id)=>{if(confirm('Excluir este registro?')){try{await db.del(t,id);load()}catch(e){toast(e.message)}}};
+function saveForm(){
+  const m=M(),livre=Math.max(0,m.lucro-m.saved);
+  modal('Novo aporte na reserva',`<p class="text-sm text-slate-400">Lucro ainda não guardado: <b class="text-emerald-400">${R(livre)}</b></p>`+fld('Valor (R$)','amount',livre.toFixed(2),'number','step="0.01" required')+fld('Descrição','description',esc(S.cfg.goal_name)),
+    d=>db.add('savings',{amount:+d.amount,description:d.description}))
+}
+function exportCSV(){
+  const h=['titulo','jogo','status','compra','extras','venda','taxa','lucro','canal','criado','vendido'];
+  const rows=S.flips.map(f=>[f.title,f.game,f.status,f.purchase_price,f.extra_costs,f.sale_price,f.platform_fee,f.status=='vendido'?profit(f).toFixed(2):'',f.channel,f.created_at,f.sold_at].map(v=>`"${(v??'').toString().replace(/"/g,'""')}"`).join(','));
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+[h.join(','),...rows].join('\n')],{type:'text/csv'}));a.download='flipcontrol.csv';a.click()
+}
+function calc(){
+  const c=+$('#k1').value,m=+$('#k2').value/100,f=+$('#k3').value/100,d=1-m-f;
+  $('#kr').innerHTML=c&&d>0?`Venda por <b class="text-emerald-400">${R(c/d)}</b> e fique com ${R(c/d*m)} de lucro.`:'Informe o custo. Margem + taxa devem somar menos de 100%.'
+}
+
+/* ====== VIEWS ====== */
+function rows(st){
+  const q=S.q.toLowerCase(),L=S.flips.filter(f=>f.status==st&&(f.title+(f.game||'')).toLowerCase().includes(q));
+  if(!L.length)return`<p class="text-slate-400 p-3">${st=='estoque'?'Nenhuma conta em estoque. Toque em "Nova conta" para cadastrar a primeira.':'Nenhuma venda ainda.'}</p>`;
+  return st=='estoque'
+  ?`<table class="w-full text-sm"><tr><th>Conta</th><th>Jogo</th><th>Custo</th><th>Parada</th><th></th></tr>${L.map(f=>`<tr><td>${f.title}</td><td>${f.game||''}</td><td>${R(cost(f))}</td><td class="${days(f.created_at)>30?'text-amber-400':''}">${days(f.created_at)} dias</td><td class="text-right whitespace-nowrap"><button class="btn" onclick="sell('${f.id}')">Vender</button><button class="lnk" onclick="flipForm('${f.id}')" aria-label="Editar"><i class="icon-pencil"></i></button><button class="lnk" onclick="rm('flips','${f.id}')" aria-label="Excluir"><i class="icon-trash-2"></i></button></td></tr>`).join('')}</table>`
+  :`<table class="w-full text-sm"><tr><th>Conta</th><th>Venda</th><th>Lucro</th><th>Canal</th><th>Data</th><th></th></tr>${L.map(f=>`<tr><td>${f.title}</td><td>${R(f.sale_price)}</td><td class="${profit(f)>=0?'text-emerald-400':'text-rose-400'} font-semibold">${R(profit(f))}</td><td>${f.channel||'-'}</td><td>${D(f.sold_at)}</td><td class="text-right whitespace-nowrap"><button class="lnk" onclick="undo('${f.id}')" aria-label="Desfazer venda"><i class="icon-undo-2"></i></button><button class="lnk" onclick="rm('flips','${f.id}')" aria-label="Excluir"><i class="icon-trash-2"></i></button></td></tr>`).join('')}</table>`
+}
+function vDash(){
+  const m=M(),p=proj(),stale=m.st.filter(f=>days(f.created_at)>30).length;
+  return`<h1 class="text-2xl font-bold">Painel</h1><p class="text-slate-400 mb-5">Seus flips e o caminho até a meta.</p>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpi('Lucro realizado',R(m.lucro),'text-emerald-400')}${kpi('Capital em estoque',R(m.inv))}${kpi('ROI das vendas',m.roi.toFixed(1)+'%','text-violet-400')}${kpi('Giro médio',m.giro.toFixed(1)+' dias')}</div>
+  <div class="card mt-3"><div class="flex justify-between text-sm mb-2"><span>${esc(S.cfg.goal_name)}: <b class="text-emerald-400">${R(m.saved)}</b> de ${R(S.cfg.goal)}</span><b>${m.pct.toFixed(1)}%</b></div>
+  <div class="h-3 bg-slate-900 rounded-full overflow-hidden"><div class="h-full bg-gradient-to-r from-violet-500 to-emerald-400" style="width:${m.pct}%"></div></div>
+  <p class="text-xs text-slate-400 mt-2">${!p.rem?'Meta atingida!':p.mo==null?'Registre vendas para ver a previsão.':`No ritmo atual (${R(p.base)}/mês), a meta fica pronta em ${fdate(p.mo)}.`}${stale?` <span class="text-amber-400">${stale} conta(s) paradas há mais de 30 dias.</span>`:''}</p></div>
+  <div class="grid lg:grid-cols-2 gap-3 mt-3"><div class="card"><h3 class="font-semibold mb-2">Lucro por mês</h3><canvas id="c1"></canvas></div><div class="card"><h3 class="font-semibold mb-2">Reserva acumulada</h3><canvas id="c2"></canvas></div></div>
+  <div class="card mt-3"><h3 class="font-semibold mb-2">Guardado por mês × necessário</h3><canvas id="c4"></canvas></div>`
+}
+function vEst(){
+  return`<div class="flex flex-wrap gap-2 items-center justify-between mb-4"><h1 class="text-2xl font-bold">Estoque</h1><div class="flex gap-2"><input class="inp" placeholder="Buscar conta" oninput="S.q=this.value;$('#tb').innerHTML=rows('estoque')" value="${S.q}"><button class="btn whitespace-nowrap" onclick="flipForm()"><i class="icon-plus"></i> Nova conta</button></div></div>
+  <div class="card mb-4"><h3 class="font-semibold mb-2">Calculadora de preço de venda</h3><div class="grid grid-cols-3 gap-2">
+  <input id="k1" class="inp" type="number" placeholder="Custo R$" oninput="calc()"><input id="k2" class="inp" type="number" value="${S.cfg.margin}" oninput="calc()" aria-label="Margem %"><input id="k3" class="inp" type="number" value="${S.cfg.fee}" oninput="calc()" aria-label="Taxa %"></div>
+  <p class="text-xs text-slate-500 mt-1">Custo, margem desejada (%) e taxa da plataforma (%).</p><p id="kr" class="mt-2 text-sm"></p></div>
+  <div id="tb" class="card overflow-x-auto">${rows('estoque')}</div>`
+}
+function vVen(){
+  const m=M();
+  return`<div class="flex flex-wrap gap-2 items-center justify-between mb-4"><h1 class="text-2xl font-bold">Vendas</h1><button class="btn2" onclick="exportCSV()"><i class="icon-download"></i> Exportar CSV</button></div>
+  <div class="grid grid-cols-3 gap-3 mb-4">${kpi('Receita',R(m.rev))}${kpi('Lucro',R(m.lucro),'text-emerald-400')}${kpi('Vendas',m.sd.length)}</div>
+  <div class="card overflow-x-auto">${rows('vendido')}</div>`
+}
+function vRes(){
+  const m=M();
+  return`<div class="flex flex-wrap gap-2 items-center justify-between mb-4"><h1 class="text-2xl font-bold">${esc(S.cfg.goal_name)}</h1><button class="btn" onclick="saveForm()"><i class="icon-plus"></i> Novo aporte</button></div>
+  <div class="grid grid-cols-3 gap-3 mb-4">${kpi('Guardado',R(m.saved),'text-emerald-400')}${kpi('Falta',R(Math.max(0,S.cfg.goal-m.saved)))}${kpi('Progresso',m.pct.toFixed(1)+'%','text-violet-400')}</div>
+  <div class="card overflow-x-auto">${S.savings.length?`<table class="w-full text-sm"><tr><th>Data</th><th>Descrição</th><th>Valor</th><th></th></tr>${S.savings.map(s=>`<tr><td>${D(s.created_at)}</td><td>${s.description||''}</td><td class="text-emerald-400 font-semibold">${R(s.amount)}</td><td class="text-right"><button class="lnk" onclick="rm('savings','${s.id}')" aria-label="Excluir"><i class="icon-trash-2"></i></button></td></tr>`).join('')}</table>`:'<p class="text-slate-400 p-3">Nenhum aporte ainda. Guarde o lucro das vendas aqui.</p>'}</div>`
+}
+function vProj(){
+  const p=proj();
+  return`<h1 class="text-2xl font-bold mb-4">Projeção</h1>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">${kpi('Meta',R(S.cfg.goal))}${kpi('Falta',R(p.rem))}${kpi('Ritmo mensal',R(p.base),'text-emerald-400')}${kpi('Previsão',p.rem?(p.mo==null?'sem dados':fdate(p.mo)):'Atingida','text-violet-400')}</div>
+  ${p.need!=null&&p.rem?`<div class="card mt-3 text-sm">Para chegar em ${D(S.cfg.deadline)} você precisa guardar <b class="text-emerald-400">${R(p.need)}/mês</b>. ${p.base>=p.need?'Você está no ritmo.':`Faltam ${R(p.need-p.base)}/mês para esse ritmo.`}</div>`:''}
+  <p class="text-xs text-slate-400 mt-2">Ritmo mensal: ${p.planned?'aporte planejado nos Ajustes':`média do lucro dos últimos ${p.n} mês(es) × ${p.pct}% enviado à reserva`}.</p>
+  <div class="card mt-3"><h3 class="font-semibold mb-2">Real (sólido) e projeção (tracejado): pessimista 70%, base e otimista 130%</h3><canvas id="c3"></canvas></div>`
+}
+function vCfg(){
+  const c=S.cfg;
+  return`<h1 class="text-2xl font-bold mb-4">Ajustes</h1><form class="card max-w-md space-y-3" onsubmit="saveCfg(event)">
+  ${fld('Nome da reserva','goal_name',esc(c.goal_name),'text','required maxlength="40"')}${fld('Meta (R$)','goal',c.goal,'number','step="0.01"')}${fld('Prazo da meta','deadline',c.deadline||'','date')}${fld('Aporte mensal planejado (R$, 0 = usar a média do lucro)','monthly',c.monthly,'number','step="0.01"')}${fld('Parte do lucro que vai para a reserva (%)','savings_pct',c.savings_pct??100,'number','min="0" max="100" step="1"')}
+  ${fld('Taxa padrão da plataforma (%)','fee',c.fee,'number','step="0.1"')}${fld('Margem de lucro desejada (%)','margin',c.margin,'number','step="0.1"')}
+  <div class="flex gap-2"><button class="btn">Salvar ajustes</button>${!LOCAL?'<button type="button" class="btn2" onclick="sb.auth.signOut()"><i class="icon-log-out"></i> Sair</button>':DEMO?'':'<button type="button" class="btn2" onclick="leaveGuest()">Criar conta para salvar na nuvem</button>'}</div></form>
+  <div class="max-w-md mt-4 text-sm text-slate-400 space-y-2">${deferred?'<button type="button" class="btn2" onclick="install()">Instalar app</button>':''}<p>iPhone: toque em Compartilhar e depois em "Adicionar à Tela de Início".</p></div>
+  ${DEMO?'<p class="text-amber-400 text-sm mt-4 max-w-md">Modo demo: preencha CFG.url e CFG.key no código para usar o Supabase com login.</p>':''}`
+}
+async function saveCfg(e){
+  e.preventDefault();const d=Object.fromEntries(new FormData(e.target));
+  const o={savings_pct:d.savings_pct===''?100:Math.min(100,Math.max(0,+d.savings_pct)),goal_name:d.goal_name.trim()||'Minha reserva',goal:+d.goal,deadline:d.deadline||null,monthly:+d.monthly||0,fee:+d.fee||0,margin:+d.margin||0};
+  try{await db.cfgSave(o);S.cfg={...S.cfg,...o,deadline:o.deadline||''};toast('Ajustes salvos');render()}catch(x){toast(x.message)}
+}
+
+/* ====== RENDER ====== */
+const NAV=[['dash','layout-dashboard','Painel'],['estoque','package','Estoque'],['vendas','badge-dollar-sign','Vendas'],['reserva','piggy-bank','Reserva'],['proj','trending-up','Projeção'],['cfg','settings','Ajustes']];
+const go=v=>{S.view=v;render()};
+const navH=x=>NAV.map(n=>`<a class="${S.view==n[0]?'on':''} ${x}" onclick="go('${n[0]}')"><i class="icon-${n[1]}"></i><span>${n[2]}</span></a>`).join('');
+function dash2(){
+  const ks=months(6),p=proj();
+  const g=ks.map(k=>S.savings.filter(s=>s.created_at.slice(0,7)==k).reduce((a,s)=>a+(+s.amount),0));
+  const ds=[{type:'bar',label:'Guardado',data:g,backgroundColor:'#8b5cf6',borderRadius:6}];
+  if(p.need!=null&&p.rem)ds.push({type:'line',label:'Necessário/mês',data:ks.map(()=>+p.need.toFixed(2)),borderColor:'#38bdf8',borderDash:[6,6],pointRadius:0});
+  mk('c4','bar',ks.map(ml),ds)
+}
+function projChart(){
+  const p=proj(),sv=p.m.saved,goal=+S.cfg.goal,t=new Date();
+  const first=S.savings.map(s=>s.created_at).sort()[0],f=first&&new Date(first);
+  const P=f?Math.min(6,Math.max(1,(t.getFullYear()-f.getFullYear())*12+t.getMonth()-f.getMonth()+1)):1;
+  const H=Math.min(120,Math.max(12,p.mo?Math.ceil(p.mo*1.15)+2:24,(p.nd||0)+2));
+  const past=months(P),L=[...past.map(ml),...[...Array(H)].map((_,i)=>ml(mkey(i+1)))],c=P-1,N=L.length,nul=()=>Array(N).fill(null);
+  const real=nul();past.forEach((k,i)=>real[i]=S.savings.filter(s=>s.created_at.slice(0,7)<=k).reduce((a,s)=>a+(+s.amount),0));
+  const sc=(fa,col,name)=>{const d=nul();for(let i=0;i<=H;i++)d[c+i]=+(sv+p.base*fa*i).toFixed(2);return{label:name,data:d,borderColor:col,borderDash:[6,4],tension:.2,pointRadius:0}};
+  const ds=[{label:'Real',data:real,borderColor:'#e2e8f0',backgroundColor:'#e2e8f0',tension:.2,pointRadius:3},sc(.7,'#f59e0b','Pessimista'),sc(1,'#10b981','Base'),sc(1.3,'#8b5cf6','Otimista'),{label:'Meta',data:Array(N).fill(goal),borderColor:'#94a3b8',borderDash:[2,4],pointRadius:0}];
+  if(p.need!=null&&p.rem){const d=nul();for(let i=0;i<=Math.min(p.nd,H);i++)d[c+i]=+(sv+p.need*i).toFixed(2);ds.push({label:'Ritmo necessário',data:d,borderColor:'#38bdf8',pointRadius:0})}
+  const dl=p.nd!=null&&c+p.nd<N?c+p.nd:-1;
+  mk('c3','line',L,ds,[{id:'dl',afterDraw(ch){if(dl<0)return;const x=ch.scales.x.getPixelForValue(dl),{top,bottom}=ch.chartArea,g=ch.ctx;g.save();g.strokeStyle=g.fillStyle='#38bdf8';g.setLineDash([4,4]);g.beginPath();g.moveTo(x,top);g.lineTo(x,bottom);g.stroke();g.fillText('Prazo',x+4,top+12);g.restore()}}])
+}
+function render(){
+  $('#nav').innerHTML=navH('');$('#bnav').innerHTML=navH('flex-col !gap-0 text-xs !p-2');
+  $('#main').innerHTML={dash:vDash,estoque:vEst,vendas:vVen,reserva:vRes,proj:vProj,cfg:vCfg}[S.view]();
+  if(S.view=='dash'){
+    const ks=months(6),pm=ks.map(k=>S.flips.filter(f=>f.status=='vendido'&&f.sold_at&&f.sold_at.slice(0,7)==k).reduce((a,f)=>a+profit(f),0));
+    mk('c1','bar',ks.map(ml),[{data:pm,backgroundColor:'#10b981',borderRadius:6}]);
+    mk('c2','line',ks.map(ml),[{data:ks.map(k=>S.savings.filter(s=>s.created_at.slice(0,7)<=k).reduce((a,s)=>a+(+s.amount),0)),borderColor:'#8b5cf6',backgroundColor:'#8b5cf633',fill:true,tension:.3}])
+  }
+  if(S.view=='dash')dash2();
+  if(S.view=='proj')projChart();
+  if(S.view=='estoque')calc();
+}
+async function load(){
+  try{
+    [S.flips,S.savings]=await Promise.all([db.list('flips'),db.list('savings')]);
+    const c=await db.cfgLoad();if(c)S.cfg={...S.cfg,...c,deadline:c.deadline||''};
+  }catch(e){toast(e.message)}
+  render()
+}
+
+/* ====== AUTENTICAÇÃO / BOOT ====== */
+const EMAIL_DOMAIN='flipcontrol.app'; // e-mail interno, nunca recebe mensagens
+const ERR=m=>/already registered/i.test(m)?'Esse usuário já existe. Escolha outro nome.':/invalid login/i.test(m)?'Usuário ou senha incorretos.':/not confirmed/i.test(m)?'Conta pendente de confirmação. Desligue "Confirm email" no Supabase.':m;
+async function auth(mode){
+  const u=$('#em').value.trim().toLowerCase(),p=$('#pw').value;
+  if(!/^[a-z0-9._-]{3,20}$/.test(u))return toast('Usuário: 3 a 20 caracteres (letras minúsculas, números, ponto, hífen ou _).');
+  if(p.length<6)return toast('A senha precisa ter ao menos 6 caracteres.');
+  if(mode=='up'){ // cria a conta já confirmada pela Edge Function "signup"
+    try{
+      const r=await fetch(CFG.url+'/functions/v1/signup',{method:'POST',headers:{'Content-Type':'application/json',apikey:CFG.key},body:JSON.stringify({username:u,password:p})});
+      const j=await r.json().catch(()=>({}));
+      if(!r.ok)return toast(j.error||'Não foi possível criar a conta. A função "signup" está publicada no Supabase?')
+    }catch(e){return toast('Falha de conexão ao criar a conta.')}
+  }
+  const{error}=await sb.auth.signInWithPassword({email:u+'@'+EMAIL_DOMAIN,password:p});
+  if(error)toast(ERR(error.message))
+}
+function gate(s){
+  if(s){LOCAL=false;$('#demoTag').classList.add('hidden')}else if(LOCAL)return;
+  $('#auth').classList.toggle('hidden',!!s);$('#app').classList.toggle('hidden',!s);
+  const id=s?.user?.id||null;if(id!==S.uid){S.uid=id;if(id)load()}
+}
+function guest(){
+  LOCAL=true;S.uid=null;$('#demoTag').classList.remove('hidden');$('#auth').classList.add('hidden');$('#app').classList.remove('hidden');load()
+}
+function leaveGuest(){
+  LOCAL=false;S.flips=[];S.savings=[];S.view='dash';$('#demoTag').classList.add('hidden');boot()
+}
+async function boot(){
+  if(LOCAL){$('#demoTag').classList.remove('hidden');$('#app').classList.remove('hidden');load();return}
+  if(!S.sub){S.sub=1;sb.auth.onAuthStateChange((_,s)=>gate(s))}
+  const{data:{session}}=await sb.auth.getSession();gate(session)
+}
+let deferred=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;if(S.view=='cfg')render()});
+const install=()=>{deferred.prompt();deferred=null;render()};
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js');
+boot();
+</script>
+</body>
+</html>
